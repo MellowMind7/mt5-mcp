@@ -1,0 +1,51 @@
+# --- Zugangsdaten -----------------------------------------------------------
+# Die .env enthaelt Kontonummer, Passwort und den MCP-Schluessel des Terminals.
+# Sie darf niemals in die Versionsgeschichte geraten. .env.example ist die
+# Vorlage ohne Werte und wird ausgeliefert.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Laufzeitdaten ----------------------------------------------------------
+logs/
+*.log
+trades.log
+
+# --- Strategietester --------------------------------------------------------
+# Der portable Tester ist eine Kopie aus der MetaTrader-Installation des
+# Nutzers. Es kommt keine einzige MetaQuotes-Binaerdatei ins Repo.
+tester/
+tester_terminal/
+terminal64.exe
+metatester64.exe
+MetaEditor64.exe
+*.ex5
+*.ex4
+Bases/
+reports/
+*.htm
+*.html
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Arbeitsstaende ---------------------------------------------------------
+scratch/
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

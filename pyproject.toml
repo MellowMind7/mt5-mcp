@@ -1,0 +1,33 @@
+[project]
+name = "mt5-mcp"
+version = "1.0.0"
+description = "One MCP server for MetaTrader 5: symbol resolution, market data, risk sizing, guarded trading, compiling and backtesting."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "mt5-mcp" }]
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=2.1.1",
+    "metatrader5>=5.0.6162",
+    "pandas>=3.0.5",
+    "pydantic>=2",
+    "python-dotenv>=1.2.3",
+    "tzdata>=2026.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.9,<0.13.0"]
+build-backend = "uv_build"
+
+[project.scripts]
+mt5-mcp = "mt5_mcp.server:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "live: needs a running MetaTrader 5 terminal; skipped by default",
+]
