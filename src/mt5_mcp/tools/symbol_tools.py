@@ -49,6 +49,9 @@ def _spec(name: str, info) -> SymbolSpec:
         filling_modes=supported_fillings(info),
         execution_mode=EXECUTION_MODE_NAMES.get(int(info.trade_exemode), "?"),
         trade_mode=TRADE_MODE_NAMES.get(int(info.trade_mode), "?"),
+        expires=bool(getattr(info, "expiration_time", 0)),
+        expiration=(triple(int(info.expiration_time)).broker
+                    if getattr(info, "expiration_time", 0) else None),
         in_market_watch=bool(getattr(info, "visible", False)),
         spread_points=int(getattr(info, "spread", 0) or 0),
     )

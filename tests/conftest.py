@@ -39,6 +39,8 @@ class FakeSymbol:
     trade_calc_mode: int = 0
     visible: bool = True
     spread: int = 1
+    expiration_time: int = 0
+    """Non-zero marks a dated contract. Futures set it; cash instruments do not."""
 
 
 @dataclass
@@ -139,6 +141,114 @@ def broker_universe() -> list[FakeSymbol]:
                     path="Nasdaq\\Stock\\AAPL", currency_base="USD",
                     currency_profit="USD", trade_calc_mode=32),
     ]
+
+
+@pytest.fixture
+def admirals_universe() -> list[FakeSymbol]:
+    """A second, structurally different broker.
+
+    Modelled on AdmiralsGroup-Demo as measured on 2026-09-06. What makes it
+    worth testing is the three-tier index layout the first broker does not
+    have at all: a cash CFD, an expiring futures CFD and a delayed ETF CFD, all
+    describing the same underlying index. MetaQuotes-Demo has no futures tier,
+    so a regression here would be invisible there.
+    """
+    cash = "Cash Indices CFDs"
+    fut = "Index Futures CFDs"
+    etf = "ETF CFDs"
+    return [
+        # --- cash indices, the ones a trader means -----------------------
+        make_symbol(name="[DJI30]", description="Dow Jones Index CFD, cash (USD)",
+                    path=rf"{cash}\[DJI30]", trade_calc_mode=4,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="[SP500]",
+                    description="Standard and Poor's Index CFD, cash (USD)",
+                    path=rf"{cash}\[SP500]", trade_calc_mode=4,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="US100", description="US100 Index CFD, cash (USD)",
+                    path=rf"{cash}\US100", trade_calc_mode=4,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="[CAC40]", description="CAC40 Index CFD, cash (EUR)",
+                    path=rf"{cash}\[CAC40]", trade_calc_mode=4,
+                    currency_base="EUR", currency_profit="EUR"),
+        make_symbol(name="GERMANY40",
+                    description="Germany 40 Index CFD, cash (EUR)",
+                    path=rf"{cash}\GERMANY40", trade_calc_mode=4,
+                    currency_base="EUR", currency_profit="EUR"),
+        make_symbol(name="[FTSE100]", description="FTSE100 Index CFD, cash (GBP)",
+                    path=rf"{cash}\[FTSE100]", trade_calc_mode=4,
+                    currency_base="GBP", currency_profit="GBP"),
+        make_symbol(name="[JP225]", description="Nikkei 225 Index CFD, cash (JPY)",
+                    path=rf"{cash}\[JP225]", trade_calc_mode=4,
+                    currency_base="JPY", currency_profit="JPY"),
+        # --- the same indices as dated futures ---------------------------
+        make_symbol(name="_YM_U6", expiration_time=1789000000,
+                    description="Dow Jones Index Futures CFD, USD [Exp: Sep 2026]",
+                    path=rf"{fut}\_YM_U6", trade_calc_mode=4,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="_ES_U6", expiration_time=1789000000,
+                    description="Standard and Poor's Index Futures CFD, USD "
+                                "[Exp: Sep 2026]",
+                    path=rf"{fut}\_ES_U6", trade_calc_mode=4,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="_US100_U6", expiration_time=1789000000,
+                    description="US Tech 100 Index Futures CFD, USD [Exp: Sep 2026]",
+                    path=rf"{fut}\_US100_U6", trade_calc_mode=4,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="_GER40_U6", expiration_time=1789000000,
+                    description="DAX40 Index Futures CFD, EUR [Exp: Sep 2026]",
+                    path=rf"{fut}\_GER40_U6", trade_calc_mode=4,
+                    currency_base="EUR", currency_profit="EUR"),
+        make_symbol(name="_FRANCE40_U6", expiration_time=1789000000,
+                    description="France 40 Index Futures CFD, EUR [Exp: Sep 2026]",
+                    path=rf"{fut}\_FRANCE40_U6", trade_calc_mode=4,
+                    currency_base="EUR", currency_profit="EUR"),
+        # --- and as delayed ETFs -----------------------------------------
+        make_symbol(name="#VUSA",
+                    description="Vanguard S&P 500 UCITS ETF CFD(15min delay)",
+                    path=rf"{etf}\#VUSA", trade_calc_mode=2,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="#SPY",
+                    description="State Street SPDR S&P 500 ETF Trust CFD(15min delay)",
+                    path=rf"{etf}\#SPY", trade_calc_mode=2,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="#CAC",
+                    description="Amundi CAC 40 UCITS ETF - Dist CFD(15min delay)",
+                    path=rf"{etf}\#CAC", trade_calc_mode=2,
+                    currency_base="EUR", currency_profit="EUR"),
+        make_symbol(name="#DOW", description="Dow Inc. CFD(15min delay)",
+                    path=r"Stock CFDs\#DOW", trade_calc_mode=2,
+                    currency_base="USD", currency_profit="USD"),
+        # --- the rest, which already worked ------------------------------
+        make_symbol(name="GOLD", description="Gold (100 oz) vs US Dollar CFD",
+                    path=r"Metals\GOLD", trade_calc_mode=4,
+                    currency_base="XAU", currency_profit="USD",
+                    trade_contract_size=100.0),
+        make_symbol(name="SILVER", description="Silver (5000 oz) vs US Dollar CFD",
+                    path=r"Metals\SILVER", trade_calc_mode=4,
+                    currency_base="XAG", currency_profit="USD",
+                    trade_contract_size=5000.0),
+        make_symbol(name="EURUSD", description="Euro vs US Dollar",
+                    path=r"Forex\EURUSD", trade_calc_mode=0),
+        make_symbol(name="BTCUSD", description="Bitcoin vs US Dollar CFD",
+                    path=r"Cryptocurrencies\BTCUSD", trade_calc_mode=4,
+                    currency_base="BTC", currency_profit="USD"),
+        make_symbol(name="BRENT",
+                    description="BRENT Crude Oil (100 barrels) CFD, USD",
+                    path=r"Energies\BRENT", trade_calc_mode=4,
+                    currency_base="USD", currency_profit="USD"),
+        make_symbol(name="#AAPL", description="Apple Inc. CFD(15min delay)",
+                    path=r"Stock CFDs\#AAPL", trade_calc_mode=2,
+                    currency_base="USD", currency_profit="USD"),
+    ]
+
+
+@pytest.fixture
+def admirals(admirals_universe):
+    from mt5_mcp.core.symbols import SymbolResolver
+    instance = SymbolResolver(FakeConnection(symbols=admirals_universe))
+    instance.load()
+    return instance
 
 
 @pytest.fixture

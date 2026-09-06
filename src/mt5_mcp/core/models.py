@@ -127,6 +127,11 @@ class SymbolBrief(Base):
     description: str = ""
     group: str = ""
     kind: str = ""
+    expires: bool = Field(
+        default=False,
+        description="True for a dated contract such as an index future. It "
+                    "expires, rolls to a new ticker, and does not track the "
+                    "cash price exactly.")
     in_market_watch: bool = False
 
 
@@ -168,6 +173,9 @@ class SymbolSpec(Base):
     filling_modes: list[str] = Field(default_factory=list)
     execution_mode: str = ""
     trade_mode: str = ""
+    expires: bool = False
+    expiration: str | None = Field(
+        default=None, description="Expiry date for a dated contract.")
     in_market_watch: bool = False
     spread_points: int | None = None
 

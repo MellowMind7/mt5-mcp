@@ -142,16 +142,34 @@ and not to the formula. The pricing-engine-first approach in
 `risk_position_size` costs nothing where the data is already right and is the
 only thing that saves the position size where it is not.
 
-One consequence worth noting: `order_calc_profit` returns nothing while a market
-is closed, so over a weekend the sizing falls back to the reported tick value —
-with its warning attached, but still the wrong number on that one feed. Sizing a
-gold position on a Sunday against MetaQuotes-Demo would be ten times too large.
-A cross-check against `contract_size x tick_size` would catch it without needing
-a live price.
+#### The weekend gap, and how it was closed
 
-### Index resolution picks futures and ETFs over the cash index
+`order_calc_profit` returns nothing while a market is closed, so over a weekend
+the sizing used to fall back to the reported tick value — with its warning
+attached, but still the wrong number on that one feed. A gold position sized on
+a Sunday against MetaQuotes-Demo would have been ten times too large, and a
+weekend is exactly when people sit down to plan trades.
 
-**Found 2026-09-06 on AdmiralsGroup-Demo. This is the most serious open item.**
+**Fixed.** `contract_size * point` is now a third source. It is static, needs no
+live price, and is compared against the reported tick value whenever the engine
+is silent:
+
+* both agree, within 2% — the figure is used, no warning needed;
+* they disagree — `risk_position_size` **raises** instead of answering, naming
+  both numbers and the factor between them;
+* profit currency is not the account currency — the static figure is in the
+  wrong money and cannot be compared, so the tick value is used with the caveat
+  attached rather than refusing a perfectly good instrument for the wrong reason.
+
+Verified live against AdmiralsGroup-Demo with the market shut: GOLD, SILVER,
+EURUSD, GERMANY40 and `[SP500]` all sized correctly, because that broker's two
+static sources agree. The refusal path is covered by unit tests carrying the
+real MetaQuotes numbers.
+
+### ~~Index resolution picks futures and ETFs over the cash index~~ — FIXED
+
+Found 2026-09-06 on AdmiralsGroup-Demo, fixed the same day under the feature
+freeze exception. Kept here because the reasoning is worth having.
 
 That broker separates three tiers that trade very differently:
 
@@ -195,8 +213,20 @@ The fix is small and sits entirely inside `_classify` and the scoring in
 cash tier for index concepts. It needs testing against both brokers, because
 MetaQuotes-Demo has no futures tier at all and would not catch a regression.
 
-Held under the v1 feature freeze pending a decision — it changes resolution
-behaviour rather than repairing something that throws.
+**Fixed.** Dated contracts are demoted by 0.35 whenever `expiration_time` is
+set — generic, never a name pattern, because `_YM_U6` becomes `_YM_Z6` next
+quarter. `etf`, `fund`, `fonds` and `trust` joined the share keywords in
+`_classify`. Bracket affixes are stripped like `#` and `_`, so `[SP500]` stems
+to `SP500`. Concept matching now sees the ticker as well as the description,
+because the cash Dow is named `[DJI30]` while its description never says "30".
+
+Futures and ETFs are demoted, not hidden: `_YM_U6` still appears among the
+candidates for "DOW" and still resolves by name. Asking for "DAX futures" lifts
+the demotion.
+
+Regression covers both brokers as separate fixtures — `broker_universe` for
+MetaQuotes-Demo, `admirals_universe` for the three-tier layout. The second one
+exists because MetaQuotes has no futures tier and could never have caught this.
 
 ---
 

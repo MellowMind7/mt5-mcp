@@ -83,9 +83,9 @@ _SUFFIXES = (
     "_raw", "_ecn", "_pro", "_stp", "_i", "_m", "-raw", "-ecn", "-pro", "-cash",
     ".r", ".m", ".i", ".c", ".p", ".a", ".s", ".z", ".x",
     "micro", "mini", "cash", "ecn", "pro", "raw",
-    "#", "+", "-", "_", ".", "m", "c", "i", "r", "z", "x", "e", "s",
+    "#", "+", "-", "_", ".", "]", "m", "c", "i", "r", "z", "x", "e", "s",
 )
-_PREFIXES = ("#", "_", ".", "fx", "cfd", "spot")
+_PREFIXES = ("#", "_", ".", "[", "fx", "cfd", "spot")
 
 
 @dataclass(frozen=True)
@@ -100,6 +100,8 @@ class SymbolRecord:
     calc_mode: int
     digits: int
     visible: bool
+    expires: bool
+    """True when the symbol carries an expiration_time — a dated contract."""
     kind: Kind
     stem: str
     """Name with broker affixes removed, uppercased. ``EURUSD.raw`` -> ``EURUSD``."""
@@ -110,6 +112,7 @@ class SymbolRecord:
             "description": self.description,
             "group": self.path.rsplit("\\", 1)[0] if "\\" in self.path else self.path,
             "kind": self.kind.value,
+            "expires": self.expires,
             "in_market_watch": self.visible,
         }
 
@@ -175,14 +178,22 @@ _CONCEPTS: tuple[Concept, ...] = (
     Concept("dax", Kind.INDEX, ("dax", "ger40", "ger30", "de40", "de30", "germany40"),
             ("DE40", "GER40", "DE30", "GER30", "DAX40", "GERMANY40"),
             require_all=("germany",)),
-    Concept("dow", Kind.INDEX, ("dow", "dowjones", "us30", "wallstreet", "wall street"),
-            ("US30", "DJ30", "WS30", "DOW30"), require_all=("30",)),
-    Concept("sp500", Kind.INDEX, ("sp500", "s&p", "spx", "us500", "standard poor"),
-            ("US500", "SPX500", "SP500", "SPX"), require_all=("500",)),
-    Concept("nasdaq", Kind.INDEX, ("nas100", "nasdaq", "ustec", "ustech", "ndx"),
-            ("USTEC", "NAS100", "NDX100", "USTECH100", "NASDAQ100"),
+    Concept("dow", Kind.INDEX,
+            ("dow", "dowjones", "us30", "dji30", "wallstreet", "wall street"),
+            ("US30", "DJ30", "DJI30", "WS30", "DOW30", "USA30"),
+            require_all=("30",)),
+    Concept("sp500", Kind.INDEX,
+            ("sp500", "s&p", "spx", "us500", "usa500", "standard and poor",
+             "standard poor"),
+            ("US500", "SPX500", "SP500", "SPX", "USA500"),
+            require_all=("500",)),
+    Concept("nasdaq", Kind.INDEX,
+            ("nas100", "nasdaq", "ustec", "ustech", "us100", "usa100", "ndx"),
+            ("USTEC", "US100", "NAS100", "NDX100", "USTECH100", "NASDAQ100",
+             "USA100"),
             require_all=("100",)),
-    Concept("ftse", Kind.INDEX, ("ftse", "uk100", "footsie"), ("UK100", "FTSE100")),
+    Concept("ftse", Kind.INDEX, ("ftse", "uk100", "footsie"),
+            ("UK100", "FTSE100", "GB100")),
     Concept("nikkei", Kind.INDEX, ("nikkei", "jpn225", "jp225"), ("JPN225", "JP225")),
     Concept("eurostoxx", Kind.INDEX, ("stoxx", "eustx", "euro stoxx"),
             ("EUSTX50", "STOXX50", "EU50")),
@@ -233,7 +244,11 @@ def _classify(calc_mode: int, base: str, profit: str, path: str) -> Kind:
             return Kind.COMMODITY
         if any(w in head for w in ("crypto", "krypto")):
             return Kind.CRYPTO
-        if any(w in head for w in ("stock", "aktien", "share", "equit")):
+        if any(w in head for w in ("stock", "aktien", "share", "equit",
+                                   "etf", "fund", "fonds", "trust")):
+            # An ETF tracking an index is not that index: it is a share, it is
+            # often quoted on delay, and handing one over for an index query is
+            # the same silent substitution this module exists to prevent.
             return Kind.STOCK
         return Kind.OTHER
     return Kind.OTHER
@@ -340,6 +355,9 @@ class SymbolResolver:
                     calc_mode=calc,
                     digits=int(getattr(s, "digits", 0) or 0),
                     visible=bool(getattr(s, "visible", False)),
+                    # Generic, never name-based: _YM_U6 becomes _YM_Z6 next
+                    # quarter, so a naming pattern would rot within months.
+                    expires=bool(getattr(s, "expiration_time", 0)),
                     kind=_classify(calc, base, profit, path),
                     stem=_stem(s.name),
                 ))
@@ -451,7 +469,10 @@ class SymbolResolver:
                 # Brokers write "US Tech 100 Index" and "Germany 40 Index";
                 # matching the de-spaced form too lets one concept word cover
                 # both "ustech" and "us tech" without listing every variant.
-                squashed = re.sub(r"[^a-z0-9]", "", desc)
+                # The ticker counts as well: the cash Dow is named [DJI30] but
+                # described as "Dow Jones Index CFD, cash" — the "30" the
+                # concept requires appears only in the name.
+                squashed = re.sub(r"[^a-z0-9]", "", desc + " " + rec.name.lower())
                 hit = any(w in desc or w in squashed for w in concept.words)
                 ok = (not concept.require_all
                       or all(w in desc or w in squashed
@@ -489,7 +510,21 @@ class SymbolResolver:
                     cand.reasons.append(
                         f"instrument class differs: {cand.record.kind.value}")
 
-        # 7. small nudges: Market Watch, plain contract over the mini one
+        # 7. dated contracts rank below their cash equivalent.
+        #    A futures CFD tracks the index but expires, rolls to a new ticker
+        #    and trades at a different price. Someone asking for "the Dow"
+        #    means the cash index; someone who wants September's contract can
+        #    still find it, one place further down or by name.
+        wants_dated = any(w in lower for w in
+                          ("future", "futures", "kontrakt", "contract", "expiry"))
+        if not wants_dated:
+            for cand in scored.values():
+                if cand.record.expires:
+                    cand.score -= 0.35
+                    cand.reasons.append(
+                        "ranked below cash: this is a dated contract that expires")
+
+        # 8. small nudges: Market Watch, plain contract over the mini one
         for cand in scored.values():
             if cand.record.visible:
                 cand.score += 0.05
@@ -502,7 +537,7 @@ class SymbolResolver:
                 cand.reasons.append("penalised: mini/micro contract")
             cand.score -= 0.01 * max(0, len(cand.record.name) - 6)
 
-        # 8. fuzzy, only when nothing else spoke up
+        # 9. fuzzy, only when nothing else spoke up
         if not scored:
             names = list(self._by_name)
             for hit in difflib.get_close_matches(upper, names, n=limit, cutoff=0.75):

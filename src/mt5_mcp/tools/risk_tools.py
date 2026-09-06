@@ -13,6 +13,10 @@ Two details that are easy to get wrong and expensive when you do:
   account currency — measured on USDJPY, they differ in the sixth digit, and on
   a cross-currency index they differ more. A stop loss is a loss, so
   ``trade_tick_value_loss`` is the one used.
+* **Three sources, in order.** The pricing engine settles it whenever it
+  can. While a market is closed it answers nothing, so the reported tick
+  value and ``contract_size * point`` are checked against each other:
+  agreement is trusted, disagreement refuses rather than guesses.
 * **Rounding goes down, never up.** ``volume_step`` forces a rounded lot size;
   rounding up would quietly risk more than the caller asked for. After rounding
   the function reports what the rounded size *actually* risks, so nobody has to
@@ -96,8 +100,29 @@ def _measured_value_per_point(info, side: str, entry: float | None) -> float:
     return abs(float(profit)) / (_PROBE_POINTS * volume)
 
 
-def value_per_point(info, *, side: str = "loss",
-                    entry: float | None = None) -> tuple[float, str, str | None]:
+def _contract_value_per_point(info, account_currency: str | None) -> float | None:
+    """A third, static source: contract size times one point.
+
+    A one-point move on ``contract_size`` units is worth exactly
+    ``contract_size * point`` in the symbol's **profit currency**. That makes it
+    a cross-check the pricing engine is not needed for — but only when the
+    profit currency is the account currency. Otherwise the number is in the
+    wrong money, and comparing it would flag every cross-currency instrument as
+    broken, so ``None`` is returned instead of a misleading figure.
+    """
+    profit_currency = (getattr(info, "currency_profit", "") or "").upper()
+    if not account_currency or profit_currency != account_currency.upper():
+        return None
+    contract = float(getattr(info, "trade_contract_size", 0.0) or 0.0)
+    point = float(getattr(info, "point", 0.0) or 0.0)
+    if not contract or not point:
+        return None
+    return contract * point
+
+
+def value_per_point(info, *, side: str = "loss", entry: float | None = None,
+                    account_currency: str | None = None
+                    ) -> tuple[float, str, str | None]:
     """Money per point per lot, in the account currency.
 
     Returns ``(value, source, warning)``.
@@ -109,34 +134,58 @@ def value_per_point(info, *, side: str = "loss",
     position ten times too large, which is the one mistake in this file that
     costs somebody real money.
 
-    So the terminal's pricing engine wins, and the documented arithmetic is the
-    fallback for when it cannot answer.
+    So the terminal's pricing engine wins. When it cannot answer — and it
+    answers nothing at all while a market is closed, which is exactly when
+    people sit down to plan trades — the two static sources are checked against
+    each other instead. Agreement is trusted. Disagreement raises: a position
+    size that might be ten times wrong is worse than no position size.
     """
     measured = _measured_value_per_point(info, side, entry)
     stated = _tick_value_formula(info, side)
+    static = _contract_value_per_point(info, account_currency)
 
-    if measured > 0 and stated > 0:
-        gap = abs(measured - stated) / max(measured, stated)
-        if gap > _DISAGREE_TOLERANCE:
-            return measured, "pricing_engine", (
-                f"This broker reports a tick value for {info.name} that "
-                f"disagrees with its own pricing engine "
-                f"({stated:.6f} vs {measured:.6f} per point per lot, "
-                f"{gap:.0%} apart). The pricing-engine figure is used, because "
-                f"that is what profit and loss are actually settled on.")
-        return measured, "pricing_engine", None
+    def gap(a: float, b: float) -> float:
+        return abs(a - b) / max(a, b)
+
     if measured > 0:
+        if stated > 0 and gap(measured, stated) > _DISAGREE_TOLERANCE:
+            return measured, "pricing_engine", (
+                f"This broker's reported tick value for {info.name} disagrees "
+                f"with its own pricing engine ({stated:.6f} vs {measured:.6f} "
+                f"per point per lot, {gap(measured, stated):.0%} apart). The "
+                f"pricing-engine figure is used, because that is what profit "
+                f"and loss are actually settled on.")
         return measured, "pricing_engine", None
+
+    # --- no live price: cross-check the two static sources -----------------
+    if stated > 0 and static:
+        if gap(stated, static) <= _DISAGREE_TOLERANCE:
+            return stated, "tick_value_confirmed", None
+        factor = max(stated, static) / min(stated, static)
+        raise ToolFailure(
+            f"Cannot size a position in {info.name} right now: its two static "
+            f"contract figures disagree by {gap(stated, static):.0%}.",
+            f"The reported tick value says {stated:.6f} per point per lot, "
+            f"contract size times point says {static:.6f}. The pricing engine "
+            f"would settle it, but it does not answer while the market is "
+            f"closed. Wait until trading opens, or work the size out by hand — "
+            f"a number that could be {factor:.0f} times wrong is worse than no "
+            f"number.")
+
     if stated > 0:
         return stated, "tick_value", (
-            "The terminal could not price a test move, so the figure comes from "
-            "the symbol's reported tick value. Check the size before trading it.")
-    contract = float(getattr(info, "trade_contract_size", 0.0) or 0.0)
-    point = float(getattr(info, "point", 0.0) or 0.0)
-    return contract * point, "contract_size", (
-        "Neither a tick value nor a test price was available, so the figure "
-        "falls back to contract size times point. That is only correct when the "
-        "profit currency matches the account currency — verify it by hand.")
+            "The terminal could not price a test move, and the profit currency "
+            "is not the account currency, so this could not be cross-checked. "
+            "It comes from the symbol's reported tick value — verify the size "
+            "before trading it.")
+    if static:
+        return static, "contract_size", (
+            "No tick value and no live price were available, so this comes from "
+            "contract size times point. Verify the size before trading it.")
+    raise ToolFailure(
+        f"Cannot determine what one point of {info.name} is worth.",
+        "The symbol reports neither a usable tick value nor a contract size, "
+        "and the terminal cannot price a test move. Size this position by hand.")
 
 
 def register(mcp) -> None:
@@ -232,8 +281,8 @@ def register(mcp) -> None:
                 f"requires at least {stops_level}. The order would be rejected "
                 f"with retcode 10016.")
 
-        per_point, source, caveat = value_per_point(info, side="loss",
-                                                    entry=entry)
+        per_point, source, caveat = value_per_point(
+            info, side="loss", entry=entry, account_currency=account.currency)
         if caveat:
             warnings.append(caveat)
         if per_point <= 0:

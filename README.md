@@ -77,6 +77,11 @@ reports a tick value ten times too small; sizing gold from that field would have
 built a position **ten times larger** than intended. When the two sources
 disagree, the tool uses the pricing engine and says so in a warning.
 
+While a market is closed the pricing engine answers nothing, so two static
+sources — the reported tick value and contract size times point — are checked
+against each other instead. If they disagree, the tool refuses rather than
+guessing: a lot size that might be ten times wrong is worse than none.
+
 Lot sizes are always rounded **down** to the broker's step, and the response
 reports what the rounded size really risks.
 
