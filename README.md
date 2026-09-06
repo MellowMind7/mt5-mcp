@@ -145,6 +145,13 @@ six seconds without running anything, so the tester needs its own.
 The copy inherits your terminal's encrypted credential store, so it signs in by
 itself and no password is written anywhere.
 
+> **On a prop-firm account, check this once first.** A backtest opens a second
+> login with the same account. Two brokers were tested and both allow it, with
+> the main terminal staying connected throughout — but prop firms often enforce
+> a single session, and one of those may disconnect your main terminal instead.
+> Run one short backtest and watch the terminal before you rely on it during an
+> evaluation.
+
 This route works on **every** MetaTrader build. If your terminal is build 6060
 or newer and you put its MCP key in `.env`, backtests and compiling use the
 terminal's own faster interface instead. `mt5_doctor` tells you which route is

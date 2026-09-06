@@ -101,6 +101,17 @@ It will:
 
 The questions have sensible defaults — press Enter to accept each one.
 
+### Before your first backtest on a prop-firm account
+
+A backtest opens a **second login with the same account**, because the portable
+copy signs in on its own. Two brokers were tested and both allow it — the main
+terminal stayed connected the whole time. Prop firms often enforce a single
+session, though, and one of those may drop your main terminal instead.
+
+Run one short backtest and watch the terminal before you rely on this during an
+evaluation. If the main terminal disconnects, do backtests on a separate demo
+account rather than the funded one.
+
 ### If you have more than one MetaTrader installed
 
 Plenty of people do: a broker's terminal beside the MetaQuotes one. The
