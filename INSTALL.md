@@ -93,13 +93,33 @@ It will:
 
 1. Check for `uv` and install it if missing
 2. Install the Python dependencies
-3. Find your terminal automatically
+3. Find your terminal — and if you have more than one, ask which
 4. Ask a few questions and write `.env`
 5. Build the portable backtest copy at `C:\mt5tester` (about 160 MB)
 6. Register the server with Claude Code
 7. Run the diagnosis and show you the result
 
 The questions have sensible defaults — press Enter to accept each one.
+
+### If you have more than one MetaTrader installed
+
+Plenty of people do: a broker's terminal beside the MetaQuotes one. The
+installer lists them all rather than guessing, with the build number and the
+account each was last used with, because that is what tells them apart:
+
+```
+      2 MetaTrader installations found:
+        [1] MetaTrader 5 <- suggested
+            build 6182, running, last used AdmiralsGroup-Demo (***4321)
+        [2] FTMO Global Markets MT5 Terminal
+            build 5833, running, last used FTMO-Demo (***2109)
+```
+
+The suggestion is the newest build that is already running. Pick the one
+holding the account you actually want to trade — a wrong pick here is not
+obviously wrong later, it simply reports a different account than you expect.
+
+You can change it afterwards in `.env` under `MT5_TERMINAL_PATH`.
 
 ### About the optional MCP key
 

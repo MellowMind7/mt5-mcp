@@ -11,17 +11,116 @@ Usage:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 
+def _account_of(data_dir: str | None) -> str:
+    """Which account a terminal last used — the thing that tells them apart.
+
+    Two MetaTrader installations look identical in a list of paths. What a
+    trader actually recognises is the broker name, so it is read out of the
+    terminal's own ``common.ini``. The login is shown masked.
+    """
+    if not data_dir:
+        return ""
+    from .core.connection import _read_text_any
+    ini = Path(data_dir) / "config" / "common.ini"
+    if not ini.is_file():
+        return ""
+    login = server = ""
+    for line in _read_text_any(ini).splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("login="):
+            login = stripped.partition("=")[2].strip()
+        elif stripped.lower().startswith("server="):
+            server = stripped.partition("=")[2].strip()
+    if not server:
+        return ""
+    from .config import mask_login
+    return f"{server} ({mask_login(login)})" if login else server
+
+
 def _find_terminal() -> int:
-    """Print the most plausible terminal path, or nothing."""
+    """Choose a terminal. Prints the menu to stderr, the chosen path to stdout.
+
+    Silently taking the first hit is wrong once a machine has more than one
+    installation, and machines do: a broker's terminal alongside the MetaQuotes
+    one is the normal case, not the exotic one. The wrong choice is not
+    obviously wrong either — it connects, it reads, and it reports somebody
+    else's account.
+
+    stdout carries nothing but the path so ``install.bat`` can still capture it
+    with ``for /f``; everything a human reads goes to stderr.
+    """
+    from .config import get_settings
     from .core.connection import find_terminals
+
     found = find_terminals()
+
+    # The portable backtest copy is ours, not an installation the user chose.
+    tester = get_settings().tester_terminal_path
+    if tester:
+        tester_dir = os.path.normcase(str(Path(tester).parent))
+        found = [t for t in found
+                 if os.path.normcase(str(Path(t.exe).parent)) != tester_dir]
+
     if not found:
         return 1
-    print(found[0].exe)
+    if len(found) == 1:
+        print(found[0].exe)
+        return 0
+
+    def describe(candidate) -> str:
+        bits = [f"build {candidate.build or '?'}"]
+        if candidate.is_running:
+            bits.append("running")
+        account = _account_of(candidate.data_dir)
+        if account:
+            bits.append(f"last used {account}")
+        return ", ".join(bits)
+
+    print(f"\n      {len(found)} MetaTrader installations found:", file=sys.stderr)
+    for index, candidate in enumerate(found, 1):
+        marker = " <- suggested" if index == 1 else ""
+        print(f"        [{index}] {Path(candidate.exe).parent.name}{marker}",
+              file=sys.stderr)
+        print(f"            {describe(candidate)}", file=sys.stderr)
+        print(f"            {candidate.exe}", file=sys.stderr)
+    print("      The suggestion is the newest build that is already running.",
+          file=sys.stderr)
+    print("      Pick the one holding the account you want to trade.",
+          file=sys.stderr)
+
+    # The prompt is written to stderr by hand. input(prompt) puts it on stdout,
+    # where install.bat's `for /f` reads it as part of the path and then reports
+    # that "Which one? [1-2, default 1]: C:\... does not exist".
+    print(f"      Which one? [1-{len(found)}, default 1]: ",
+          end="", file=sys.stderr, flush=True)
+    try:
+        # Strip a UTF-8 BOM as well: piped input on Windows often carries one,
+        # and "\ufeff1" is not a number.
+        answer = input().strip().lstrip("\ufeff").strip()
+    except (EOFError, KeyboardInterrupt):
+        # Non-interactive run: say what was chosen rather than choosing quietly.
+        print(f"      No input available; using [1] {found[0].exe}",
+              file=sys.stderr)
+        print(found[0].exe)
+        return 0
+
+    choice = found[0]
+    if answer:
+        try:
+            index = int(answer)
+            if 1 <= index <= len(found):
+                choice = found[index - 1]
+            else:
+                print(f"      {answer} is not in range; using [1].",
+                      file=sys.stderr)
+        except ValueError:
+            print(f"      {answer!r} is not a number; using [1].", file=sys.stderr)
+    print(choice.exe)
     return 0
 
 

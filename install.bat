@@ -59,7 +59,9 @@ echo       done
 rem --- 3. find the terminal ---------------------------------------------------
 echo.
 echo [3/7] Looking for your MetaTrader 5 terminal...
-for /f "usebackq delims=" %%T in (`"%UV%" run python -m mt5_mcp.setup_helper find-terminal 2^>nul`) do set "TERMINAL=%%T"
+rem stderr is deliberately NOT redirected: when several installations exist the
+rem chooser prints its menu there and only the chosen path on stdout.
+for /f "usebackq delims=" %%T in (`"%UV%" run python -m mt5_mcp.setup_helper find-terminal`) do set "TERMINAL=%%T"
 if "%TERMINAL%"=="" (
     echo       No terminal found automatically.
     set /p TERMINAL="      Full path to terminal64.exe: "
