@@ -79,6 +79,50 @@ class TestBrokerClock:
         clock._reading = aged
         assert clock.is_stale()
 
+    def test_a_stale_weekend_quote_is_refused(self):
+        """Regression: a closed market produced "broker time is UTC-37.75 h".
+
+        Measured against a real broker on a Sunday. The newest quote was from
+        Friday's close, and the offset arithmetic cannot tell that apart from a
+        time zone — so it reported one, and every timestamp the server returned
+        would have been shifted by thirty-eight hours.
+        """
+        clock = BrokerClock()
+        friday_close = datetime.now(timezone.utc) - timedelta(hours=38)
+        assert clock.measure(friday_close.timestamp(), "EURUSD") is None
+        assert clock.reading is None
+
+    def test_a_refused_measurement_keeps_the_previous_one(self):
+        clock = BrokerClock()
+        good = datetime.now(timezone.utc) + timedelta(hours=3)
+        clock.measure(good.timestamp(), "EURUSD")
+        stale = datetime.now(timezone.utc) - timedelta(hours=50)
+        assert clock.measure(stale.timestamp(), "XAUUSD") is None
+        assert clock.offset == timedelta(hours=3)
+
+    @pytest.mark.parametrize("hours", [-12, -8, 0, 2, 3, 10, 14])
+    def test_real_time_zones_are_accepted(self, hours):
+        clock = BrokerClock()
+        stamp = datetime.now(timezone.utc) + timedelta(hours=hours)
+        reading = clock.measure(stamp.timestamp(), "EURUSD")
+        assert reading is not None
+        assert reading.offset == timedelta(hours=hours)
+
+    @pytest.mark.parametrize("hours", [-38, -25, 15, 48])
+    def test_impossible_offsets_are_refused(self, hours):
+        clock = BrokerClock()
+        stamp = datetime.now(timezone.utc) + timedelta(hours=hours)
+        assert clock.measure(stamp.timestamp(), "EURUSD") is None
+
+    def test_refusal_is_explained_as_a_closed_market(self):
+        clock = BrokerClock()
+        stale = datetime.now(timezone.utc) - timedelta(hours=38)
+        clock.measure(stale.timestamp(), "EURUSD")
+        described = clock.describe()
+        assert described["measured"] is False
+        assert "market is closed" in described["note"]
+        assert "38 hours" in described["note"]
+
     def test_unmeasured_clock_is_stale_and_zero(self):
         clock = BrokerClock()
         assert clock.is_stale()

@@ -443,21 +443,31 @@ class Mt5Connection:
     # -- derived state ----------------------------------------------------
 
     def _refresh_clock_locked(self, symbol: str = "EURUSD") -> None:
-        """Measure the broker offset from any symbol that is ticking."""
+        """Measure the broker offset from whichever symbol is ticking freshest.
+
+        Several symbols are tried because one stale quote is not evidence about
+        the clock. ``measure`` refuses an implausible result, so this keeps
+        going until a candidate produces a real time zone or the list runs out —
+        over a closed weekend none of them will, and the clock stays honestly
+        unmeasured rather than confidently wrong.
+        """
         try:
-            tick = self._worker.submit(lambda: mt5.symbol_info_tick(symbol),
-                                       timeout=20)
-            if tick is None or not getattr(tick, "time", 0):
-                for fallback in self._worker.submit(
-                        lambda: [s.name for s in (mt5.symbols_get() or [])[:40]],
-                        timeout=30):
-                    tick = self._worker.submit(
-                        lambda n=fallback: mt5.symbol_info_tick(n), timeout=20)
-                    if tick is not None and getattr(tick, "time", 0):
-                        symbol = fallback
-                        break
-            if tick is not None and getattr(tick, "time", 0):
-                self.clock.measure(tick.time, symbol)
+            candidates = [symbol]
+            candidates += self._worker.submit(
+                lambda: [s.name for s in (mt5.symbols_get() or [])
+                         if getattr(s, "visible", False)][:20],
+                timeout=30)
+            seen: set[str] = set()
+            for name in candidates:
+                if name in seen:
+                    continue
+                seen.add(name)
+                tick = self._worker.submit(
+                    lambda n=name: mt5.symbol_info_tick(n), timeout=20)
+                if tick is None or not getattr(tick, "time", 0):
+                    continue
+                if self.clock.measure(tick.time, name) is not None:
+                    return
         except Exception:  # noqa: BLE001 - a missing offset is not fatal
             log.debug("could not measure the broker offset", exc_info=True)
 

@@ -274,6 +274,12 @@ def register(mcp) -> None:
                 add("live_quote", "warn", f"No tick data for {name}.",
                     "Outside market hours this is normal. During the week it "
                     "means the symbol is not subscribed at your broker.")
+            elif connection.clock.reading is None:
+                # Without a measured offset a tick age cannot be computed; the
+                # arithmetic would just restate the unknown offset as an age.
+                add("live_quote", "ok",
+                    f"{name} bid {tick.bid} ask {tick.ask}. Age unknown while "
+                    f"the broker offset is unmeasured.")
             else:
                 age = (datetime.now(timezone.utc)
                        - connection.clock.to_utc(tick.time)).total_seconds()
@@ -292,9 +298,11 @@ def register(mcp) -> None:
                 f"{clock['broker_minus_display_hours']:+g} h against "
                 f"{settings.timezone_display}.")
         else:
-            add("broker_clock", "warn", "The broker time offset is not measured yet.",
-                "It is measured from the first tick that arrives. Outside market "
-                "hours it may stay unknown.")
+            add("broker_clock", "warn",
+                clock.get("note", "The broker time offset is not measured yet."),
+                "Nothing to fix if the market is closed — it is measured from "
+                "the first fresh quote that arrives. Until then, times are "
+                "shown as the broker sent them.")
 
         # 8. files folder ----------------------------------------------------
         data_dir = getattr(terminal_info, "data_path", None)

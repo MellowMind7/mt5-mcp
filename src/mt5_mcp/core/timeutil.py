@@ -36,6 +36,13 @@ _TTL = timedelta(minutes=30)
 # removes tick latency and clock drift without hiding a real offset.
 _QUANTUM_SECONDS = 900
 
+# Real time zones run from UTC-12 to UTC+14. Anything outside that is not an
+# offset, it is a stale quote being mistaken for one: over a closed weekend the
+# newest tick is a day or two old, and measuring against it yields an
+# "offset" of minus thirty-odd hours. Believing that would shift every
+# timestamp the server returns by the same amount, silently.
+MAX_PLAUSIBLE_OFFSET = timedelta(hours=14)
+
 
 @dataclass(frozen=True)
 class ClockReading:
@@ -64,29 +71,44 @@ class BrokerClock:
         self._ttl = ttl
         self._reading: ClockReading | None = None
         self._lock = threading.Lock()
+        self._rejected_gap: timedelta | None = None
+        """Raw gap from the last implausible measurement, kept to explain why."""
 
     # -- measurement ------------------------------------------------------
 
-    def measure(self, tick_time: int | float, symbol: str = "?") -> ClockReading:
+    def measure(self, tick_time: int | float,
+                symbol: str = "?") -> ClockReading | None:
         """Record an offset from one tick timestamp.
 
         ``tick_time`` is ``symbol_info_tick().time`` — seconds since epoch, but
         expressed in broker wall-clock time rather than UTC.
+
+        Returns ``None`` and keeps the previous reading when the result is not a
+        possible time zone. That happens whenever the newest quote is stale,
+        which over a closed weekend it always is: the measurement cannot tell a
+        broker three hours ahead from a quote thirty-eight hours old, so an
+        implausible answer is refused rather than believed.
         """
         now_utc = datetime.now(timezone.utc)
         # Read the broker stamp *as if* it were UTC to recover its wall clock.
         broker_wall = datetime.fromtimestamp(float(tick_time), tz=timezone.utc)
         raw = (broker_wall - now_utc).total_seconds()
+        if abs(raw) > MAX_PLAUSIBLE_OFFSET.total_seconds():
+            with self._lock:
+                self._rejected_gap = timedelta(seconds=raw)
+            return None
         rounded = round(raw / _QUANTUM_SECONDS) * _QUANTUM_SECONDS
         reading = ClockReading(timedelta(seconds=rounded), now_utc, symbol)
         with self._lock:
             self._reading = reading
+            self._rejected_gap = None
         return reading
 
     def invalidate(self) -> None:
         """Forget the cached offset — called on every (re)connect."""
         with self._lock:
             self._reading = None
+            self._rejected_gap = None
 
     @property
     def reading(self) -> ClockReading | None:
@@ -126,6 +148,17 @@ class BrokerClock:
         """Diagnostic block for ``mt5_status`` and ``mt5_doctor``."""
         r = self.reading
         if r is None:
+            with self._lock:
+                rejected = self._rejected_gap
+            if rejected is not None:
+                hours = abs(rejected.total_seconds()) / 3600.0
+                return {
+                    "measured": False,
+                    "note": (f"Broker offset cannot be measured: the newest "
+                             f"quote is roughly {hours:.0f} hours old, so the "
+                             f"market is closed. Times are shown as the broker "
+                             f"sent them, without conversion."),
+                }
             return {
                 "measured": False,
                 "note": "Broker offset not measured yet — no tick has arrived.",
